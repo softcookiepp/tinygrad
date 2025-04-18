@@ -202,7 +202,7 @@ class GLSLRenderer(CStyleLanguage):
 	def render_cast(self, dt: DType, val: str) -> str:
 		return f"{self.render_dtype(dt)}({val})"
 	
-	def render(self, uops:list[UOp]) -> str:
+	def __render(self, uops:list[UOp]) -> str:
 		r: dict[UOp, str] = {}
 		self.r = r
 
