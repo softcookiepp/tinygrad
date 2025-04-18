@@ -11,6 +11,8 @@ import hashlib
 
 
 # kompute-specific stuff
+import kp
+input("peepeepoopoo")
 try:
 	import kp
 except ImportError:
