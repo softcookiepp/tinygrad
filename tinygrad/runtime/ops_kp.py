@@ -9,10 +9,6 @@ from typing import List, Any
 import os
 import hashlib
 
-
-# kompute-specific stuff
-import kp
-input("peepeepoopoo")
 try:
 	import kp
 except ImportError:
@@ -31,8 +27,10 @@ def _split_device(device: str):
 	
 def _get_kp_float_size(nbytes):
 	# Kompute stupidly doesn't let you allocate tensors that aren't 32-bit floats??
-	assert (nbytes*8) % 32 == 0
-	return nbytes*8//32
+	if nbytes % 4 != 0:
+		# pad it to length of 32 bits
+		nbytes = 4*int(np.ceil(nbytes/4) )
+	return nbytes//4
 	
 class KomputeAllocator(Allocator):
 	def __init__(self, manager: kp.Manager):
@@ -51,7 +49,11 @@ class KomputeAllocator(Allocator):
 		mgr, kpt = dest
 		src = src.cast("c")
 		dest_mv = memoryview(kpt.data() ).cast("c")
-		dest_mv[:] = src
+		
+		# determine correct length
+		# since kompute buffers are always multiples of 4, they may be larger than the other buffer
+		end = len(dest_mv) if len(dest_mv) < len(src) else len(src)
+		dest_mv[0:end] = src[0:end]
 
 	def _copyout(self, dest:memoryview, src):
 		mgr, kpt = src
