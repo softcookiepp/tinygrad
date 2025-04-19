@@ -36,9 +36,7 @@ class KomputeAllocator(Allocator):
 	def __init__(self, manager: kp.Manager):
 		self._mgr = manager
 	def _alloc(self, size:int, options:BufferSpec):
-		print(size, options)
 		fsize = _get_kp_float_size(size)
-		print(fsize)
 		if options.image is not None:
 			raise NotImplementedError
 		t = self._mgr.tensor_t(np.random.randn(fsize).astype(np.float32) )
@@ -91,9 +89,6 @@ class KomputeProgram:
 	
 	def __call__(self, *bufs, global_size=(1,1,1), local_size=(1,1,1), vals=(), wait=False):
 		kp_tensors = []
-		print(global_size, local_size)
-		
-		
 		shader_source = self._local_shader_source(local_size)
 		spirv = GLSL_COMPILER.compile_cached(shader_source)
 		

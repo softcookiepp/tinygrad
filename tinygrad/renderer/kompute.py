@@ -63,6 +63,10 @@ glsl_rewrite = PatternMatcher([
 	(UPat(Ops.BARRIER), lambda ctx: ctx.barrier),
 	(UPat(Ops.NOOP, name="x"), lambda ctx,x: ctx[x.src[0]]),
 	(UPat(Ops.SPECIAL, name="x"), lambda ctx,x: f"{ctx.code_for_workitem[x.arg[0][0]](x.arg[0][-1])}; /* {x.arg[1]} */"),
+	
+	# max should be easies
+	(UPat(Ops.MAX, name="m"), lambda ctx, m: f"max({ctx[m.src[0]]}, {ctx[m.src[1]]})"),
+	
 	# const
 	(UPat(Ops.CONST, arg=math.inf, name="x"), lambda ctx, x: f"({ctx.render_cast(x.dtype, ctx.infinity)})"),
 	(UPat(Ops.CONST, arg=-math.inf, name="x"), lambda ctx, x: f"({ctx.render_cast(x.dtype, f'-{ctx.infinity}')})"),
@@ -95,6 +99,16 @@ glsl_rewrite = PatternMatcher([
 	# custom passes through with format
 	(UPat(Ops.CUSTOM, name="x"), lambda ctx,x: x.arg.format(*[ctx[y] for y in x.src]))
 	
+	# hopefully these worksies
+	# insert a NOOP before BITCAST to force it to be rendered. not needed on all backends?
+	
+	# devectorize any bools
+	#(UPat((*GroupOp.ALU, Ops.CAST, Ops.BITCAST, Ops.ASSIGN, Ops.INDEX), dtype=dtypes.bool, name="alu"), no_vectorized_alu),
+	# CAST (from bool) can't be vectorized
+	#(UPat(Ops.CAST, src=(UPat(dtype=dtypes.bool),), name="alu"), no_vectorized_alu),
+	# WHERE can't be vectorized
+	#(UPat(Ops.WHERE, name="alu"), no_vectorized_alu),
+	
 ])
 
 class GLSLRenderer(CStyleLanguage):
@@ -112,7 +126,7 @@ class GLSLRenderer(CStyleLanguage):
 	#barrier = "workgroupBarrier();"
 	# if a return b else return c
 	# lets see...
-	code_for_op = {**CStyleLanguage.code_for_op
+	code_for_op = {**CStyleLanguage.code_for_op,
 		#Ops.WHERE: lambda a,b,c,dtype: f"(bool({a})?{b}:{c})",
 		#Ops.CMPLT: lambda a,b,dtype: f"bool({a} < {b})"
 		#Ops.CMPNE: lambda a,b,dtype, x: f"({a} != {b}))" # this is the most ridiculous way to do it...
