@@ -15,6 +15,13 @@ glsl_matcher = None
 
 from tinygrad.runtime.ops_kp import *
 
+EXTENSIONS = {
+	"half": [
+		"#extension GL_EXT_shader_explicit_arithmetic_types_float16 : require\n",
+		"#extension GL_EXT_shader_16bit_storage : require\n"
+	]
+}
+
 def _bitcast(ctx, x):
 	# GLSL is very picky about bitcasting, insofar as it has dedicated
 	# bitcasting functions for each data type.
@@ -181,7 +188,15 @@ class GLSLRenderer(CStyleLanguage):
 		return lines
 	
 	def _render_extensions(self, bufs, uops):
-		return []
+		extensions = []
+		extension_keys = []
+		for buf in bufs:
+			name, (dtype, rw) = buf
+			if dtype.base == dtypes.half and (not "half" in extension_keys):
+				extensions += EXTENSIONS["half"]
+				extension_keys.append("half")
+		print(extensions)
+		return extensions
 		
 	def render_dtype(self, dt: DType, mutable = True):
 		if isinstance(dt, PtrDType):
@@ -195,18 +210,24 @@ class GLSLRenderer(CStyleLanguage):
 		#for op in uops: print(op)
 		#input("look at the ops you silly")
 		
-		true_kernel = self._render_vulkan_macros()
+		vulkan_macros = self._render_vulkan_macros()
 		
+		
+		
+		extensions = self._render_extensions(bufs, uops)
+		
+		buffer_declarations = []
 		for buf in bufs:
-			true_kernel.append(self._render_buffer(buf) )
-		
+			buffer_declarations.append(self._render_buffer(buf) )
 		
 		#tmp = "const sampler_t smp = CLK_NORMALIZED_COORDS_FALSE | CLK_ADDRESS_CLAMP | CLK_FILTER_NEAREST;\n" if any(isinstance(dtype, ImageDType) for _,(dtype,_) in bufs) else ""  # noqa: E501
 		tmp = ""
 		buftypes = [(name, self.render_dtype(dtype, mutable)+self.buffer_suffix if isinstance(dtype, (ImageDType, PtrDType)) else self.arg_int_prefix if dtype == dtypes.int else None) for name,(dtype,mutable) in bufs]
 		
 		prg = ''.join(
-			true_kernel + 
+			vulkan_macros +
+			extensions + 
+			buffer_declarations +
 			[f"{self.kernel_prefix}void {function_name}(",] +
 			[") {\n" + tmp] + ['\n'.join(kernel), "\n}"] +
 			[f"\nvoid main() {{ {function_name}(); }}"]
