@@ -99,7 +99,7 @@ glsl_rewrite = PatternMatcher([
 	#(UPat(Ops.CMPNE, name = "x"), lambda ctx, x: f"{x}"),
 	# alu/gep
 	(UPat(GroupOp.ALU, name="x"), lambda ctx,x: ctx.code_for_op[x.op](
-	*([strip_parens(ctx[v]) if v.op == x.op and x.op in {Ops.ADD, Ops.MUL, Ops.XOR} else ctx[v] for v in x.src]), x.dtype)),
+		*([strip_parens(ctx[v]) if v.op == x.op and x.op in {Ops.ADD, Ops.MUL, Ops.XOR} else ctx[v] for v in x.src]), x.dtype)),
 	(UPat(Ops.GEP, name="x"), lambda ctx,x: ctx[x.src[0]] + \
 	(f"[{x.arg[0]}]" if x.src[0].dtype.count > (8 if ctx.device in {"CUDA", "NV"} else 4) or ctx.device in {'CPU', 'DSP'} else \
 	 f".{'xyzwabcd'[x.arg[0]]}")),
@@ -165,6 +165,13 @@ class GLSLRenderer(CStyleLanguage):
 	def __init__(self, device):
 		self._kompute_device = device
 		super().__init__()
+		# have to have self declared in order to render the dtype I guess
+		#self.code_for_op[Ops.ADD] = lambda a, b, dtype: f"( {self.render_dtype(dtype)}({a})  +  {self.render_dtype(dtype)}({b}) )"
+		#self.code_for_op[Ops.SUB] = lambda a, b, dtype: f"( {self.render_dtype(dtype)}({a})  -  {self.render_dtype(dtype)}({b}) )"
+		#self.code_for_op[Ops.MUL] = lambda a, b, dtype: f"( {self.render_dtype(dtype)}({a})  *  {self.render_dtype(dtype)}({b}) )"
+		#self.code_for_op[Ops.FDIV] = lambda a, b, dtype: f"( {self.render_dtype(dtype)}({a})  /  {self.render_dtype(dtype)}({b}) )"
+		#self.code_for_op[Ops.IDIV] = lambda a, b, dtype: f"( {self.render_dtype(dtype)}({a})  /  {self.render_dtype(dtype)}({b}) )"
+		self.code_for_op[Ops.RECIP] = lambda x,dtype: f"({self.render_dtype(dtype)}(1)/{x})"
 	
 	def _render_buffer(self, buf):
 		name, (dtype, rw) = buf
@@ -187,7 +194,13 @@ class GLSLRenderer(CStyleLanguage):
 		]
 		return lines
 	
-	def _render_extensions(self, bufs, uops):
+	def _extract_uop_params(self, uops, attr):
+		for uop in uops:
+			yield uop.__getattribute__("dtype")
+			for attr_val in self._extract_uop_params(uop.src, attr):
+				yield attr_val
+	
+	def _render_extensions(self, bufs, uops, kernel):
 		extensions = []
 		extension_keys = []
 		for buf in bufs:
@@ -195,7 +208,23 @@ class GLSLRenderer(CStyleLanguage):
 			if dtype.base == dtypes.half and (not "half" in extension_keys):
 				extensions += EXTENSIONS["half"]
 				extension_keys.append("half")
-		print(extensions)
+				break
+		"""
+		print("extracting")
+		dtype_list = list( self._extract_uop_params(uops, "dtype") )
+		input("extracted")
+		print("checking dtypes")
+		for dt in dtype_list:
+			if dt.base == dtypes.half and (not "half" in extension_keys):
+				extensions += EXTENSIONS["half"]
+				extension_keys.append("half")
+				break
+		input("dtypes checked")
+		"""
+		if (not "half" in extension_keys) and self.render_dtype(dtypes.half) in "\n".join(kernel):
+			extensions += EXTENSIONS["half"]
+			extension_keys.append("half")
+		
 		return extensions
 		
 	def render_dtype(self, dt: DType, mutable = True):
@@ -213,8 +242,7 @@ class GLSLRenderer(CStyleLanguage):
 		vulkan_macros = self._render_vulkan_macros()
 		
 		
-		
-		extensions = self._render_extensions(bufs, uops)
+		extensions = self._render_extensions(bufs, uops, kernel)
 		
 		buffer_declarations = []
 		for buf in bufs:
@@ -232,6 +260,7 @@ class GLSLRenderer(CStyleLanguage):
 			[") {\n" + tmp] + ['\n'.join(kernel), "\n}"] +
 			[f"\nvoid main() {{ {function_name}(); }}"]
 		)
+		print("float16_t" in prg)
 		return prg if prefix is None else "\n".join(prefix)+f"\n{prg}"
 		
 	def render_cast(self, dt: DType, val: str) -> str:

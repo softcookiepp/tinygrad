@@ -61,3 +61,7 @@ site/
 profile_stats
 *.log
 target
+
+# GLSL temp files
+tmp.glsl
+tmp.spirv
