@@ -9,5 +9,10 @@ def test():
 	c = (a + b).sin()*20.0 / (d + 0.01)
 	return c.realize()
 print(test().numpy() )
-pp = tinygrad.Tensor(np.arange(2).astype(np.int8), device="KP:1" ).realize()
+pp = tinygrad.Tensor(np.arange(2).astype(np.int8) ).realize()
 print(pp.device)
+
+conv = tinygrad.nn.Conv2d(3, 5, 6)
+img = tinygrad.Tensor.randn(2, 3, 256, 266)
+out = conv(img)
+print(out.numpy() )
