@@ -194,12 +194,6 @@ class GLSLRenderer(CStyleLanguage):
 		]
 		return lines
 	
-	def _extract_uop_params(self, uops, attr):
-		for uop in uops:
-			yield uop.__getattribute__("dtype")
-			for attr_val in self._extract_uop_params(uop.src, attr):
-				yield attr_val
-	
 	def _render_extensions(self, bufs, uops, kernel):
 		extensions = []
 		extension_keys = []
@@ -209,18 +203,7 @@ class GLSLRenderer(CStyleLanguage):
 				extensions += EXTENSIONS["half"]
 				extension_keys.append("half")
 				break
-		"""
-		print("extracting")
-		dtype_list = list( self._extract_uop_params(uops, "dtype") )
-		input("extracted")
-		print("checking dtypes")
-		for dt in dtype_list:
-			if dt.base == dtypes.half and (not "half" in extension_keys):
-				extensions += EXTENSIONS["half"]
-				extension_keys.append("half")
-				break
-		input("dtypes checked")
-		"""
+
 		if (not "half" in extension_keys) and self.render_dtype(dtypes.half) in "\n".join(kernel):
 			extensions += EXTENSIONS["half"]
 			extension_keys.append("half")
@@ -236,9 +219,6 @@ class GLSLRenderer(CStyleLanguage):
 		# I would say implement a different render() method due to the
 		# difference between kernel and the overall program,
 		# but in Vulkan there is no difference; the shader serves a single purpose.
-		#for op in uops: print(op)
-		#input("look at the ops you silly")
-		
 		vulkan_macros = self._render_vulkan_macros()
 		
 		
@@ -260,66 +240,7 @@ class GLSLRenderer(CStyleLanguage):
 			[") {\n" + tmp] + ['\n'.join(kernel), "\n}"] +
 			[f"\nvoid main() {{ {function_name}(); }}"]
 		)
-		print("float16_t" in prg)
 		return prg if prefix is None else "\n".join(prefix)+f"\n{prg}"
 		
 	def render_cast(self, dt: DType, val: str) -> str:
 		return f"{self.render_dtype(dt)}({val})"
-	
-	def __render(self, uops:list[UOp]) -> str:
-		r: dict[UOp, str] = {}
-		self.r = r
-
-		child_count = Counter(v for ru in uops for v in ru.src)
-		bufs: dict[UOp, tuple[str, tuple[DType, bool]]] = {}
-		kernel = []
-		depth = 1
-		c: defaultdict[str, int] = defaultdict(int)
-		name = "test"
-		for u in uops:
-			if u.op is Ops.NAME:
-				name = u.arg
-				continue
-			if u.op in (Ops.DEFINE_GLOBAL, Ops.DEFINE_VAR):
-				r[u] = f"data{u.arg}" if u.op is Ops.DEFINE_GLOBAL else u.arg[0]
-				bufs[u] = (r[u], (u.dtype, False))
-				continue
-
-			# mark buffers that we store to writable
-			if u.op is Ops.STORE:
-				for up in u.src[0].toposort:
-					if up.op is Ops.DEFINE_GLOBAL: bufs[up] = (bufs[up][0], (bufs[up][1][0], True))
-
-			# naming
-			prefix = None
-			if u.op is Ops.SPECIAL:
-				r[u] = u.arg[0]
-			else:
-				prefix = {Ops.RANGE: "ridx", Ops.WMMA: "wmma", Ops.DEFINE_LOCAL: "temp", Ops.CONST: "const",
-					Ops.CAST: "cast", Ops.BITCAST: "cast", Ops.GEP: "gep", Ops.VECTORIZE: "cast", Ops.NOOP: "precast",
-					Ops.INDEX: "bidx", Ops.DEFINE_ACC: "acc", Ops.LOAD: "val"}.get(u.op, "alu")
-				r[u] = f"{prefix}{c[prefix]}"
-
-			l = cast(str, self.string_rewrite.rewrite(u, ctx=self))
-			
-			if "*" in l and (not "/*" in l):
-				pass#print(u.op, l)
-				#input("you dun goofded")
-			assert l is not None, f"failed to render {u.op} {u.dtype} {[(x.op,x.dtype) for x in u.src]} {u.arg}"
-
-			if u.op in {Ops.ENDIF, Ops.ENDRANGE}: depth -= 1
-			if u.op in {Ops.CONST, Ops.GEP, Ops.INDEX, Ops.CUSTOM} or \
-					(u.op in {Ops.VECTORIZE, *GroupOp.ALU, Ops.CAST, Ops.BITCAST} and child_count[u] == 1 and not getenv("EXPAND_SSA")):
-				r[u] = l
-			else:
-				if u.op in {Ops.RANGE, Ops.ASSIGN, Ops.DEFINE_LOCAL} or u.dtype == dtypes.void:
-					if u.op is Ops.ASSIGN: r[u] = r[u.src[0]]
-				else:
-					l = f"{self.render_dtype(u.dtype)} {r[u]} = {l}" + (";" if u.op is not Ops.SPECIAL else "")
-				kernel.append("  "*depth + l)
-				if prefix: c[prefix] += 1  # if it was used, increment
-			if u.op in {Ops.IF, Ops.RANGE}: depth += 1
-		del self.r
-
-		# NOTE: this relies on bufs dict preserving order
-		return self.render_kernel(name, kernel, list(bufs.values()), uops)
