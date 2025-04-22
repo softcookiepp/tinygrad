@@ -65,3 +65,7 @@ target
 # GLSL temp files
 tmp.glsl
 tmp.spirv
+
+# symlinks
+test/test
+test/extra

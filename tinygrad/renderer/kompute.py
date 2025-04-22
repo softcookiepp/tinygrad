@@ -60,6 +60,11 @@ glsl_rewrite = PatternMatcher([
 	(UPat(Ops.DEFINE_LOCAL, name="x"), lambda ctx,x: f"{ctx.smem_align}{ctx.smem_prefix}{ctx.render_dtype(x.dtype.base)} {ctx[x]}[{x.dtype.size}];"),
 	(UPat(Ops.SPECIAL, name="x"), lambda ctx,x: f"{ctx.code_for_workitem[x.arg[0][0]](x.arg[0][-1])}; /* {x.arg[1]} */"),
 	
+	# bitwise logical operators don't work with booleans in glsl
+	# either use logical operators or cast to other type
+	(UPat(Ops.AND, (dtypes.bool), name = "x"), lambda ctx, x: f"( {ctx[x.src[0]]} && {ctx[x.src[1]]} )"),
+	(UPat(Ops.OR, (dtypes.bool), name = "x"), lambda ctx, x: f"( {ctx[x.src[0]]} || {ctx[x.src[1]]} )"),
+	
 	# max should be easies
 	(UPat(Ops.MAX, name="m"), lambda ctx, m: f"max({ctx[m.src[0]]}, {ctx[m.src[1]]})"),
 	
@@ -67,7 +72,7 @@ glsl_rewrite = PatternMatcher([
 	(UPat(Ops.CONST, (dtypes.bfloat16, dtypes.half), name="x"), lambda ctx,x: f"({ctx.render_cast(x.dtype, f'{x.arg}f')})"),
 	(UPat(Ops.CONST, (dtypes.uint8, dtypes.uint16), name="x"), lambda ctx,x: f"({ctx.render_cast(x.dtype, f'{x.arg}u')})"),
 	(UPat(Ops.CONST, (dtypes.int8, dtypes.int16), name="x"), lambda ctx,x: f"({ctx.render_cast(x.dtype, x.arg)})"),
-	
+	(UPat(Ops.CONST, dtype=dtypes.bool, name="x"), lambda ctx,x: "true" if x.arg else "false"),
 	
 	# need different indexing, since glsl doesn't use pointers
 	(UPat(Ops.INDEX, src=(UPat.var("buf"), UPat.var('idx')), allow_any_len=True),
@@ -118,8 +123,9 @@ class GLSLRenderer(CStyleLanguage):
 	# if a return b else return c
 	# lets see...
 	code_for_op = {**CStyleLanguage.code_for_op,
-		#Ops.WHERE: lambda a,b,c,dtype: f"(bool({a})?{b}:{c})",
-		#Ops.CMPLT: lambda a,b,dtype: f"bool({a} < {b})"
+		Ops.WHERE: lambda a,b,c,dtype: f"(bool({a})?{b}:{c})"
+		#Ops.CMPLT: lambda a,b,dtype: f"bool({a} < {b})",
+		#Ops.CMPGT: lambda a,b,dtype: f"bool({a} > {b})",
 		#Ops.CMPNE: lambda a,b,dtype, x: f"({a} != {b}))" # this is the most ridiculous way to do it...
 	}# f"select({c},{b},{a})"}
 	#del code_for_op[Ops.CMPNE]
