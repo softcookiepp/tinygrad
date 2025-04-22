@@ -11,12 +11,11 @@ def test():
 out = test()
 print(out.numpy() )
 
-mat1 = tinygrad.Tensor.arange(4*5, device = "KP:1", dtype = dtypes.float).reshape(4, 5)
-mat2 = tinygrad.Tensor.arange(5*3, device = "KP:1", dtype = dtypes.float).reshape(5, 3)
+mat1 = tinygrad.Tensor.arange(4*5, device = "CPU", dtype = dtypes.float).reshape(4, 5)
+mat2 = tinygrad.Tensor.arange(5*3, device = "CPU", dtype = dtypes.float).reshape(5, 3)
 
-out_kp = mat1.dot(mat2).realize()
-input()
-out_cpu = mat1.to("CPU").dot(mat2.to("CPU") )
+out_cpu = mat1.dot(mat2).realize()
+out_kp = mat1.to("KP:1").dot(mat2.to("KP:1") )
 print(  ( (out_kp.to("CPU") - out_cpu)**2).mean().numpy()  )
 print(out_kp.numpy() )
 print(out_cpu.numpy() )

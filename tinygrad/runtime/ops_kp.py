@@ -52,6 +52,9 @@ class KomputeAllocator(Allocator):
 		# since kompute buffers are always multiples of 4, they may be larger than the other buffer
 		end = len(dest_mv) if len(dest_mv) < len(src) else len(src)
 		dest_mv[0:end] = src[0:end]
+		
+		# forgot to add the part that actually syncs it, I am dumb
+		mgr.sequence().eval(kp.OpTensorSyncDevice([kpt]) )
 
 	def _copyout(self, dest:memoryview, src):
 		mgr, kpt = src
