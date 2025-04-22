@@ -61,7 +61,6 @@ class KomputeAllocator(Allocator):
 		# first sync with host
 		mgr.sequence().eval(kp.OpTensorSyncLocal([kpt]) )
 		data = kpt.data()
-		input(data)
 		mv_src = memoryview(data).cast("c")
 		dest = dest.cast("c")
 		dest[:] = mv_src
