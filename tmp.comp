@@ -1,0 +1,67 @@
+#version 450
+#extension GL_EXT_control_flow_attributes : enable
+#extension GL_EXT_buffer_reference : require
+#extension GL_EXT_shader_explicit_arithmetic_types: require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64: require
+#extension GL_EXT_shader_16bit_storage : require
+#extension GL_EXT_shader_explicit_arithmetic_types_float64 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_float16 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int16 : require
+#extension GL_EXT_shader_8bit_storage : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int8 : require
+
+layout(local_size_x = 8, local_size_y = 16, local_size_z = 1) in;
+
+#define ADDR_T uint64_t
+#define INFINITY uintBitsToFloat(0x7F800000)
+#define NAN uintBitsToFloat(0x7FC00000)
+#define PI 3.14159265358979323846
+#define STORE_VEC(buf, idx, vector, size, VEC_T) { VEC_T tmpV = vector; for (uint i = 0; i < size; i += 1) buf[idx + i] = tmpV[i]; }
+#define LOAD_VEC2(buf, idx, VEC_T) VEC_T(buf[idx], buf[idx + 1])
+#define LOAD_VEC4(buf, idx, VEC_T) VEC_T(buf[idx], buf[idx + 1], buf[idx + 2], buf[idx + 3])
+precise float exp2_precise(float t) { precise float s = exp2(t); return s; }
+precise float log2_precise(float t) { if (t == 0.0) return -1.0*INFINITY; precise float s = log2(t); return s; }
+
+precise float64_t exp2(float64_t x) { precise float tmp =  float(x); tmp = pow(2.0, tmp); return float64_t(tmp); }
+precise float64_t exp2_precise(float64_t t) { precise float64_t s = exp2(t); return s; }
+precise float64_t log2_precise(float64_t t) { if (t == 0.0) return float64_t(-1.0*INFINITY); precise float s = log2(float(t)); return float64_t(s); }
+
+precise float16_t exp2_precise(float16_t t) { precise float16_t s = exp2(t); return s; }
+precise float16_t log2_precise(float16_t t) { if (t == 0.0) return float16_t(-1.0*INFINITY); precise float16_t s = log2(t); return s; }
+layout(buffer_reference, std140, buffer_reference_align = 16) buffer double_ptr { double data[]; };
+layout(buffer_reference, std140, buffer_reference_align = 16) buffer float_ptr { float data[]; };
+layout(buffer_reference, std140, buffer_reference_align = 16) buffer uint8_t_ptr { uint8_t data[]; };
+layout(buffer_reference, std140, buffer_reference_align = 16) buffer uint16_t_ptr { uint16_t data[]; };
+layout(buffer_reference, std140, buffer_reference_align = 16) buffer int16_t_ptr { int16_t data[]; };
+layout(buffer_reference, std140, buffer_reference_align = 16) buffer int8_t_ptr { int8_t data[]; };
+layout(buffer_reference, std140, buffer_reference_align = 16) buffer int_ptr { int data[]; };
+layout(buffer_reference, std140, buffer_reference_align = 16) buffer int64_t_ptr { int64_t data[]; };
+layout(buffer_reference, std140, buffer_reference_align = 16) buffer uint64_t_ptr { uint64_t data[]; };
+layout(buffer_reference, std140, buffer_reference_align = 16) buffer uint_ptr { uint data[]; };
+layout(buffer_reference, std140, buffer_reference_align = 16) buffer float16_t_ptr { float16_t data[]; };
+layout(buffer_reference, std140, buffer_reference_align = 16) buffer vec2_ptr { vec2 data[]; };
+layout(buffer_reference, std140, buffer_reference_align = 16) buffer vec4_ptr { vec4 data[]; };
+layout(buffer_reference, std140, buffer_reference_align = 16) buffer f16vec2_ptr { f16vec2 data[]; };
+layout(buffer_reference, std140, buffer_reference_align = 16) buffer f16vec4_ptr { f16vec4 data[]; };
+layout(buffer_reference, std140, buffer_reference_align = 16) buffer ivec2_ptr { ivec2 data[]; };
+layout(buffer_reference, std140, buffer_reference_align = 16) buffer ivec4_ptr { ivec4 data[]; };
+layout(buffer_reference, std140, buffer_reference_align = 16) buffer uvec2_ptr { uvec2 data[]; };
+layout(buffer_reference, std140, buffer_reference_align = 16) buffer uvec4_ptr { uvec4 data[]; };
+layout(buffer_reference, std140, buffer_reference_align = 16) buffer bvec2_ptr { bvec2 data[]; };
+layout(buffer_reference, std140, buffer_reference_align = 16) buffer bvec4_ptr { bvec4 data[]; };
+
+float nan() { uint bits = 0xffffffffu; return uintBitsToFloat(bits); }
+layout(push_constant) uniform push_consts { 	ADDR_T data0_65536; 	ADDR_T data1_65536; } push;
+void main()
+{
+  int gidx0 = int(gl_WorkGroupID.x); /* 4 */
+  int gidx1 = int(gl_WorkGroupID.y); /* 32 */
+  int lidx0 = int(gl_LocalInvocationID.x); /* 8 */
+  int lidx1 = int(gl_LocalInvocationID.y); /* 16 */
+  int alu0 = (lidx0+(gidx1<<(3))+(gidx0<<(14))+(lidx1<<(10)));
+  float val0 = float_ptr(push.data1_65536 + alu0*4).data[0];
+  float val1 = float_ptr(push.data1_65536 + (alu0+(256))*4).data[0];
+  float val2 = float_ptr(push.data1_65536 + (alu0+(512))*4).data[0];
+  float val3 = float_ptr(push.data1_65536 + (alu0+(768))*4).data[0];
+  vec4_ptr(push.data0_65536 + (((gidx0<<(6))+(lidx1<<(2))+(gidx1<<(11))+(lidx0<<(8)))*4)).data[0] = vec4(val0,val1,val2,val3);
+}
