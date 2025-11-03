@@ -159,6 +159,17 @@ class GLSLRenderer(CStyleLanguage):
 		#	number of unique indices
 		#	local size
 		#	any ops like range
+		# so it should look like:
+"""
+		local_size_flat = np.prod(local_size)
+		cache_size = 0
+		for idx_op in self._index_ops[b]:
+			cache_size += local_size_flat*get_total_indices(idx_op)
+"""
+		# where local_size_flat is the flattened local size,
+		# get_total_indices is a to-be-written function that gets the total number of indices an operation can provide,
+		# and cache_size is the size of a given buffer's cache.
+		# still need to take multiple types into account...this might be a pain in the bum
 		self._index_ops[b].add(idx_op)
 	
 	def buf_map(self, dt:DType) -> str:
