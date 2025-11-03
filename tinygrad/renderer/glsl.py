@@ -126,7 +126,7 @@ class GLSLRenderer(CStyleLanguage):
 		(UPat(Ops.VECTORIZE, name="x"), lambda ctx, x: f"{ctx.render_dtype(x.dtype)}" + f"{ctx.float4_style[0]}{','.join([ctx[y] for y in x.src])}{ctx.float4_style[1]}"),
 		(UPat(Ops.CMPLT, dtype = dtypes.bool, src = (UPat.var("x", dtype = dtypes.bool), UPat.var("y", dtype = dtypes.bool) ) ),
 			lambda ctx, x, y: f"uint({ctx[x]}) < uint({ctx[y]})"),
-		(UPat(Ops.RECIP, src = (UPat.var("x")) ), lambda ctx, x: f"{ctx.render_dtype(x.dtype)}(1) / {ctx[x]}"),
+		(UPat(Ops.RECIPROCAL, src = (UPat.var("x")) ), lambda ctx, x: f"{ctx.render_dtype(x.dtype)}(1) / {ctx[x]}"),
 		(UPat(Ops.ADD, dtype = dtypes.float.vec(2), src = (UPat.var("a"), UPat.var("b")) ), lambda ctx, a, b:  f"{ctx[a]} + {ctx[b]}"),
 		(UPat(Ops.SUB, dtype = dtypes.float.vec(2), src = (UPat.var("a"), UPat.var("b")) ), lambda ctx, a, b:  f"{ctx[a]} - {ctx[b]}"),
 		(UPat(Ops.MUL, dtype = dtypes.float.vec(2), src = (UPat.var("a"), UPat.var("b")) ), lambda ctx, a, b:  f"{ctx[a]} * {ctx[b]}"),

@@ -2,6 +2,7 @@ from tinygrad.dtype import DType, PtrDType, dtypes, AddrSpace, truncate
 from tinygrad.uop.ops import UOp, Ops, PatternMatcher, UPat, GroupOp
 from tinygrad.renderer.cstyle import OpenCLRenderer, base_rewrite, extra_pm, wmma_args
 from tinygrad.helpers import strip_parens
+import math
 
 class ClspvRenderer(OpenCLRenderer):
   device = "VK"

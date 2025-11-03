@@ -10,7 +10,15 @@
 #extension GL_EXT_shader_8bit_storage : require
 #extension GL_EXT_shader_explicit_arithmetic_types_int8 : require
 
-layout(local_size_x = 8, local_size_y = 16, local_size_z = 1) in;
+layout(local_size_x = 1, local_size_y = 1, local_size_z = 1) in;
+
+struct read_cache_entry {
+	uint index;
+	bool stored;
+};
+
+#define zero_entry = read_cache_entry(0, false)
+#define ZERO_CACHE(buf, size) { 	if (gl_LocalInvocationID.x == gl_LocalInvocationID.y == gl_LocalInvocationID.z == 0) 	{ 		for (uint i = 0; i < size; i += 1) buf[i] = zero_entry; 	} 	barrier(); } 
 
 #define ADDR_T uint64_t
 #define INFINITY uintBitsToFloat(0x7F800000)
@@ -51,17 +59,25 @@ layout(buffer_reference, std140, buffer_reference_align = 16) buffer bvec2_ptr {
 layout(buffer_reference, std140, buffer_reference_align = 16) buffer bvec4_ptr { bvec4 data[]; };
 
 float nan() { uint bits = 0xffffffffu; return uintBitsToFloat(bits); }
-layout(push_constant) uniform push_consts { 	ADDR_T data0_65536; 	ADDR_T data1_65536; } push;
+layout(push_constant) uniform push_consts { 	ADDR_T data0_1; 	ADDR_T data1_6; } push;
 void main()
 {
-  int gidx0 = int(gl_WorkGroupID.x); /* 4 */
-  int gidx1 = int(gl_WorkGroupID.y); /* 32 */
-  int lidx0 = int(gl_LocalInvocationID.x); /* 8 */
-  int lidx1 = int(gl_LocalInvocationID.y); /* 16 */
-  int alu0 = (lidx0+(gidx1<<(3))+(gidx0<<(14))+(lidx1<<(10)));
-  float val0 = float_ptr(push.data1_65536 + alu0*4).data[0];
-  float val1 = float_ptr(push.data1_65536 + (alu0+(256))*4).data[0];
-  float val2 = float_ptr(push.data1_65536 + (alu0+(512))*4).data[0];
-  float val3 = float_ptr(push.data1_65536 + (alu0+(768))*4).data[0];
-  vec4_ptr(push.data0_65536 + (((gidx0<<(6))+(lidx1<<(2))+(gidx1<<(11))+(lidx0<<(8)))*4)).data[0] = vec4(val0,val1,val2,val3);
+  int val0 = int_ptr(push.data1_6 + (0)*4).data[0];
+  int val1 = int_ptr(push.data1_6 + (1)*4).data[0];
+  int val2 = int_ptr(push.data1_6 + (2)*4).data[0];
+  int val3 = int_ptr(push.data1_6 + (3)*4).data[0];
+  int val4 = int_ptr(push.data1_6 + (4)*4).data[0];
+  int val5 = int_ptr(push.data1_6 + (5)*4).data[0];
+  uint8_t alu0 = ((uint8_t(val0))^(uint8_t(-1u)));
+  uint8_t alu1 = ((uint8_t(val1))^(uint8_t(-1u)));
+  uint8_t alu2 = ((uint8_t(val2))^(uint8_t(-1u)));
+  uint8_t alu3 = ((uint8_t(val3))^(uint8_t(-1u)));
+  uint8_t alu4 = ((uint8_t(val4))^(uint8_t(-1u)));
+  uint8_t alu5 = ((uint8_t(val5))^(uint8_t(-1u)));
+  uint8_t alu6 = (alu0<alu1) ? alu1 : alu0;
+  uint8_t alu7 = (alu6<alu2) ? alu2 : alu6;
+  uint8_t alu8 = (alu7<alu3) ? alu3 : alu7;
+  uint8_t alu9 = (alu8<alu4) ? alu4 : alu8;
+  uint8_t alu10 = (alu9<alu5) ? alu5 : alu9;
+  uint8_t_ptr(push.data0_1 + (0)*1).data[0] = (alu10^(uint8_t(-1u)));
 }
