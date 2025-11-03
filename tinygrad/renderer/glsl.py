@@ -8,9 +8,6 @@ import numpy as np
 from tinygrad.codegen.opt.tc import TensorCore
 SAVE_RENDERED_KERNELS = True if "VK_SAVE_RENDERED" in os.environ.keys() else False
 
-# so how do I understand the cache size?
-# it must be local size * size of any range operators.
-
 def render_store(ctx, b, v):
 	if b.op == Ops.CAST:
 		if b.dtype.addrspace == AddrSpace.REG or b.dtype.addrspace == AddrSpace.LOCAL:
