@@ -8,10 +8,22 @@ import numpy as np
 from tinygrad.codegen.opt.tc import TensorCore
 SAVE_RENDERED_KERNELS = True if "VK_SAVE_RENDERED" in os.environ.keys() else False
 
-dummy_cores = [TensorCore(dims=(4,4,1), threads=1, elements_per_thread=(4,4,4*4), dtype_in=dt, dtype_out=dt,
-                  swizzle=(((), ('u0', 'u1', 'u2', 'u3'), ()),
-                           ((), ('u0', 'u1', 'u2', 'u3'), ())),
-                  opts=("u0","u0", "u1", "u1")) for dt,sz in [(dt, 16 // dt.itemsize) for dt in [dtypes.float]]]
+if False:
+	dummy_cores = [TensorCore(dims=(4,4,1), threads=1, elements_per_thread=(4,4,4*4), dtype_in=dt, dtype_out=dt,
+					  swizzle=(((), ('u0', 'u1', 'u2', 'u3'), ()),
+							   ((), ('u0', 'u1', 'u2', 'u3'), ())),
+					  opts=("u0","u0", "u1", "u1")) for dt,sz in [(dt, 16 // dt.itemsize) for dt in [dtypes.float]]]
+elif False:
+	dummy_cores = [TensorCore(dims=(2,2,1), threads=1, elements_per_thread=(2,2,4), dtype_in=dt, dtype_out=dt,
+		swizzle=(((), ("u0", "u1"), ()),
+			   ((), ("u0", "u1"), ())),
+		opts=("u0", "u1")) for dt,sz in [(dt, 16 // dt.itemsize) for dt in [dtypes.float]]]
+else:
+	# this one currently works 100%
+	dummy_cores = [TensorCore(dims=(1,1,1), threads=1, elements_per_thread=(1,1,1), dtype_in=dt, dtype_out=dt,
+		swizzle=(((), (), ()),
+			   ((), (), ())),
+		opts=()) for dt,sz in [(dt, 16 // dt.itemsize) for dt in [dtypes.float]]]
 
 def render_store(ctx, b, v):
 	if b.op == Ops.CAST:
@@ -91,7 +103,7 @@ class GLSLRenderer(CStyleLanguage):
 	code_for_op = {**CStyleLanguage.code_for_op, Ops.EXP2: lambda x,dtype: f"exp2_precise({x})",
 		Ops.LOG2: lambda x,dtype: f"log2_precise({x})"}
 	name = "glsl"
-	#tensor_cores = dummy_cores
+	tensor_cores = dummy_cores
 	
 	string_rewrite = PatternMatcher([
 		(UPat(Ops.WMMA, name="x"), lambda ctx,x: f"{x.arg[0]}({ctx[x.src[0]]}, {ctx[x.src[1]]}, {ctx[x.src[2]]})"),
@@ -294,6 +306,17 @@ vec16 WMMA_4_4_1_float_float(vec4 a, vec4 b, vec16 c)
 	return ZERO_VEC16;
 }
 
+float WMMA_1_1_1_float_float(float a, float b, float c)
+{
+	return fma(a, b, c);
+}
+#if 0
+vec4 WMMA_2_2_1_float_float(vec2 a, vec2 b, vec4 c)
+{
+	mat2 ab = outerProduct(a);
+	return c + vec4(ab[0][0], ab[0][1], ab[1][0], ab[1][1]);
+}
+#endif
 #define ADDR_T uint64_t
 #define INFINITY uintBitsToFloat(0x7F800000)
 #define NAN uintBitsToFloat(0x7FC00000)
