@@ -83,15 +83,18 @@ class GLSLRenderer(CStyleLanguage):
 	type_map = { dtypes.double: "double", dtypes.float: "float", dtypes.uchar: "uint8_t", dtypes.ushort: "uint16_t", dtypes.short: "int16_t",
 		dtypes.char: "int8_t", dtypes.int32: "int", dtypes.int64: "int64_t", dtypes.uint64: "uint64_t", dtypes.uint32: "uint", dtypes.uint64: "uint64_t", dtypes.bool: "bool", dtypes.half: "float16_t",
 		dtypes.float.vec(2): "vec2", dtypes.float.vec(4): "vec4", dtypes.half.vec(2): "f16vec2", dtypes.half.vec(4): "f16vec4", dtypes.int.vec(2): "ivec2", dtypes.int.vec(4): "ivec4",
-		dtypes.uint.vec(2): "uvec2", dtypes.uint.vec(4): "uvec4", dtypes.bool.vec(2): "bvec2", dtypes.bool.vec(4): "bvec4"}
+		dtypes.uint.vec(2): "uvec2", dtypes.uint.vec(4): "uvec4", dtypes.bool.vec(2): "bvec2", dtypes.bool.vec(4): "bvec4",
+		dtypes.float.vec(16): "vec16"}
 	barrier = "barrier();"
 	supports_float4 = False
 	float4 = "vec4"
 	code_for_op = {**CStyleLanguage.code_for_op, Ops.EXP2: lambda x,dtype: f"exp2_precise({x})",
 		Ops.LOG2: lambda x,dtype: f"log2_precise({x})"}
 	name = "glsl"
+	#tensor_cores = dummy_cores
 	
 	string_rewrite = PatternMatcher([
+		(UPat(Ops.WMMA, name="x"), lambda ctx,x: f"{x.arg[0]}({ctx[x.src[0]]}, {ctx[x.src[1]]}, {ctx[x.src[2]]})"),
 		(UPat(Ops.ADD, src = (UPat(Ops.MUL, name = "a"), UPat(Ops.MUL, name = "b"))), _render_dot),
 		(UPat(Ops.ADD, src = (UPat(Ops.MUL, name = "a"), UPat.var("b") ), name = "c" ), _render_fma),
 		(UPat(Ops.CONST, dtype=dtypes.int64, name="x"), lambda ctx,x: f"{x.arg}l"),
@@ -127,7 +130,9 @@ class GLSLRenderer(CStyleLanguage):
 		(UPat(Ops.CONST, dtype = dtypes.uint, name="x"), lambda ctx,x: f"({x.arg})"),
 		
 		(UPat(Ops.WHERE, src = (UPat.var("a"), UPat.var("b"), UPat.var("c") )), lambda ctx, a, b, c: f"{ctx[a]} ? {ctx[b]} : {ctx[c]}" ),
+		(UPat(Ops.GEP, src = (UPat.var("a", dtype = dtypes.float.vec(16)),), name="x"), lambda ctx,x, a: ctx[x.src[0]] + f".data[{x.arg[0]}]"),
 		(UPat(Ops.GEP, name="x"), lambda ctx,x: ctx[x.src[0]] + f"[{x.arg[0]}]"),
+		(UPat(Ops.VECTORIZE, dtype = dtypes.float.vec(16), name="x"), lambda ctx, x: f"make_{ctx.render_dtype(x.dtype)}" + f"{ctx.float4_style[0]}{','.join([ctx[y] for y in x.src])}{ctx.float4_style[1]}"),
 		(UPat(Ops.VECTORIZE, name="x"), lambda ctx, x: f"{ctx.render_dtype(x.dtype)}" + f"{ctx.float4_style[0]}{','.join([ctx[y] for y in x.src])}{ctx.float4_style[1]}"),
 		(UPat(Ops.CMPLT, dtype = dtypes.bool, src = (UPat.var("x", dtype = dtypes.bool), UPat.var("y", dtype = dtypes.bool) ) ),
 			lambda ctx, x, y: f"uint({ctx[x]}) < uint({ctx[y]})"),
@@ -245,6 +250,49 @@ struct read_cache_entry {
 	barrier(); \
 } \
 
+struct vec16 {
+	float data[16];
+};
+
+vec16 make_vec16(float x0, float x1, float x2, float x3, float x4, float x5, float x6, float x7, float x8, float x9, float x10, float x11, float x12, float x13, float x14, float x15)
+{
+	return vec16(float[16](x0, x1, x2, x3, x4, x5, x6, x7, x8, x9, x10, x11, x12, x13, x14, x15) );
+}
+
+#define ZERO_VEC16 make_vec16(0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0)
+
+float dot(vec16 a, vec16 b)
+{
+	float d = 0.0;
+	for (uint i = 0; i < 16; i += 4)
+	{
+		vec4 a4 = vec4(a.data[i], a.data[i+1], a.data[i+2], a.data[i+3]);
+		vec4 b4 = vec4(b.data[i], b.data[i+1], b.data[i+2], b.data[i+3]);
+		d += dot(a4, b4);
+	}
+	return d;
+}
+
+vec16 add(vec16 a, vec16 b)
+{
+	vec16 d = ZERO_VEC16;
+	for (uint i = 0; i < 16; i += 4)
+	{
+		vec4 a4 = vec4(a.data[i], a.data[i+1], a.data[i+2], a.data[i+3]);
+		vec4 b4 = vec4(b.data[i], b.data[i+1], b.data[i+2], b.data[i+3]);
+		vec4 c = a4 + b4;
+		d.data[i] += c[0];
+		d.data[i+1] += c[1];
+		d.data[i+2] += c[2];
+		d.data[i+3] += c[3];
+	}
+	return d;
+}
+
+vec16 WMMA_4_4_1_float_float(vec4 a, vec4 b, vec16 c)
+{
+	return ZERO_VEC16;
+}
 
 #define ADDR_T uint64_t
 #define INFINITY uintBitsToFloat(0x7F800000)
