@@ -6,6 +6,7 @@ import functools
 import os
 import numpy as np
 from tinygrad.codegen.opt.tc import TensorCore
+from copy import deepcopy
 SAVE_RENDERED_KERNELS = True if "VK_SAVE_RENDERED" in os.environ.keys() else False
 
 if False:
@@ -75,7 +76,7 @@ def _render_dot(ctx, a, b):
 
 def _render_index(ctx, idx_uop, b,idx):
 	if isinstance(b.dtype, PtrDType) and b.op == Ops.DEFINE_GLOBAL and ctx.supports_float4:
-		ctx.add_index_op(b, idx_uop)
+		#ctx.add_index_op(b, idx_uop)
 		#ctx._index_ops.add(idx_uop)
 		#return f"push.{ctx[b]}.data[{strip_parens(ctx[idx]) if idx.arg is Ops.ADD else ctx[idx]}]"
 		return f"{ctx.render_bda(b.dtype.base)}(push.{ctx[b]} + {strip_parens(ctx[idx]) if idx.arg is Ops.ADD else ctx[idx]}*{b.dtype.base.itemsize}).data[0]"
@@ -172,10 +173,18 @@ class GLSLRenderer(CStyleLanguage):
 		
 	def render_cache_record(self, b):
 		raise NotImplementedError
+		
+	def render_indices_to_cache(self, index_op):
+		# This is where an index op will be converted into a series of indices to cache.
+		raise NotImplementedError
 	
-	def add_index_op(self, b, idx_op):
+	def add_index_op(self, b, idx_op, new_dtype = None):
+		if new_dtype is None:
+			new_dtype = idx_op.dtype.base
 		if not b in self._index_ops.keys():
-			self._index_ops[b] = set()
+			self._index_ops[b] = {}
+		if not new_dtype in self._index_ops[b].keys():
+			self._index_ops[b][new_dtype] = set()
 		# so how do we know how big a chunk of shared memory needs to be?
 		# it is going to be determined by several factors.
 		#	number of unique indices
@@ -192,7 +201,32 @@ class GLSLRenderer(CStyleLanguage):
 		# get_total_indices is a to-be-written function that gets the total number of indices an operation can provide,
 		# and cache_size is the size of a given buffer's cache.
 		# still need to take multiple types into account...this might be a pain in the bum
-		self._index_ops[b].add(idx_op)
+		# wait, should I do this based on string?
+		self._index_ops[b][new_dtype].add(idx_op)
+		
+		# altering the uop seems to break stuff, unfortunately.
+		# Some of the rendering may also need to be done here...
+		
+		# So what will be required is to recreate basically the entire flow of logic that makes up a given index.
+		# Each will then be used for the cache once this is figured out.
+		# oh god this is going to be hacky.
+		def _inspect_uop(uop):
+			if len(uop.src) == 0:
+				pass#print(uop)
+				#input(self[uop])
+			elif uop.op in [Ops.SPECIAL, Ops.RANGE]:
+				# there should be another condition that detects operations like range, special, etc.
+				# then these can be made variable and iterated over.
+				#print(uop)
+				#print(self[uop])
+				pass
+			else:
+				#print(type(uop.arg))
+				#print(uop)
+				#print(self[uop])
+				for child in uop.src:
+					_inspect_uop(child)
+		_inspect_uop(idx_op)
 	
 	def buf_map(self, dt:DType) -> str:
 		if dt.base == dtypes.bool:
@@ -208,8 +242,6 @@ class GLSLRenderer(CStyleLanguage):
 		return f"{self.type_map[dt]}"
 	
 	def _render_cast_index(self, b):
-		self.add_index_op(b.src[0].src[0], b.src[0])
-		#self._index_ops.add(b.src[0])
 		assert b.op == Ops.CAST and b.src[0].op == Ops.INDEX
 		buf, idx = b.src[0].src[0], b.src[0].src[1]
 		assert not buf.dtype.addrspace in [AddrSpace.LOCAL, AddrSpace.REG]
@@ -222,7 +254,12 @@ class GLSLRenderer(CStyleLanguage):
 	def render_complete_load(self, b):
 		if b.op == Ops.CAST and isinstance(b.dtype, PtrDType) and b.dtype.base.count > 1:
 			if not (b.dtype.addrspace in (AddrSpace.REG, AddrSpace.LOCAL) ):
-				return self._render_cast_index(b)
+				# this will be a special case for add_index_op, since the dtype will be different.
+				# we only need to cache loads, not stores. of course. silly
+				self.add_index_op(b.src[0].src[0], b.src[0], b.dtype.base)
+				loaded = self._render_cast_index(b)
+				# I see how this is starting to come together now...
+				return loaded
 			buf = b.src[0].src[0]
 			idx = b.src[0].src[1]
 			b_rendered = f"LOAD_VEC{b.dtype.base.count}({self[buf]}, {self[idx]}, {self.render_dtype(b.dtype.base)})"
@@ -233,6 +270,9 @@ class GLSLRenderer(CStyleLanguage):
 				b_rendered += f"{self[idx]}, "
 			b_rendered = f"{self.render_dtype(b.dtype)}({b_rendered.strip(', ')})"
 		else:
+			if not (b.dtype.addrspace in (AddrSpace.REG, AddrSpace.LOCAL) ):
+				# this is where the self.add_index_op goes
+				self.add_index_op(b.src[0], b)
 			b_rendered = self[b]
 			if b.dtype.base is dtypes.bool:
 				# booleans in GLSL are 32-bit, but tinygrad expects them to be stored as 8-bit.
