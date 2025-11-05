@@ -13,8 +13,6 @@ dummy_cores = [TensorCore(dims=(4,4,1), threads=1, elements_per_thread=(4,4,4*4)
                            ((), ('u0', 'u1', 'u2', 'u3'), ())),
                   opts=("u0","u0", "u1", "u1")) for dt,sz in [(dt, 16 // dt.itemsize) for dt in [dtypes.float]]]
 
-
-
 def render_store(ctx, b, v):
 	if b.op == Ops.CAST:
 		if b.dtype.addrspace == AddrSpace.REG or b.dtype.addrspace == AddrSpace.LOCAL:
