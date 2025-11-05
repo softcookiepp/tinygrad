@@ -8,6 +8,13 @@ import numpy as np
 from tinygrad.codegen.opt.tc import TensorCore
 SAVE_RENDERED_KERNELS = True if "VK_SAVE_RENDERED" in os.environ.keys() else False
 
+dummy_cores = [TensorCore(dims=(4,4,1), threads=1, elements_per_thread=(4,4,4*4), dtype_in=dt, dtype_out=dt,
+                  swizzle=(((), ('u0', 'u1', 'u2', 'u3'), ()),
+                           ((), ('u0', 'u1', 'u2', 'u3'), ())),
+                  opts=("u0","u0", "u1", "u1")) for dt,sz in [(dt, 16 // dt.itemsize) for dt in [dtypes.float]]]
+
+
+
 def render_store(ctx, b, v):
 	if b.op == Ops.CAST:
 		if b.dtype.addrspace == AddrSpace.REG or b.dtype.addrspace == AddrSpace.LOCAL:
@@ -160,12 +167,12 @@ class GLSLRenderer(CStyleLanguage):
 		#	local size
 		#	any ops like range
 		# so it should look like:
-"""
-		local_size_flat = np.prod(local_size)
-		cache_size = 0
-		for idx_op in self._index_ops[b]:
-			cache_size += local_size_flat*get_total_indices(idx_op)
-"""
+#"""
+#		local_size_flat = np.prod(local_size)
+#		cache_size = 0
+#		for idx_op in self._index_ops[b]:
+#			cache_size += local_size_flat*get_total_indices(idx_op)
+#"""
 		# where local_size_flat is the flattened local size,
 		# get_total_indices is a to-be-written function that gets the total number of indices an operation can provide,
 		# and cache_size is the size of a given buffer's cache.
