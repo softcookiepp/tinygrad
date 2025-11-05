@@ -103,7 +103,7 @@ class GLSLRenderer(CStyleLanguage):
 	code_for_op = {**CStyleLanguage.code_for_op, Ops.EXP2: lambda x,dtype: f"exp2_precise({x})",
 		Ops.LOG2: lambda x,dtype: f"log2_precise({x})"}
 	name = "glsl"
-	tensor_cores = dummy_cores
+	#tensor_cores = dummy_cores
 	
 	string_rewrite = PatternMatcher([
 		(UPat(Ops.WMMA, name="x"), lambda ctx,x: f"{x.arg[0]}({ctx[x.src[0]]}, {ctx[x.src[1]]}, {ctx[x.src[2]]})"),
