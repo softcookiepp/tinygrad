@@ -19,6 +19,12 @@ elif False:
 		swizzle=(((), ("u0", "u1"), ()),
 			   ((), ("u0", "u1"), ())),
 		opts=("u0", "u1")) for dt,sz in [(dt, 16 // dt.itemsize) for dt in [dtypes.float]]]
+elif True:
+	dummy_cores = [TensorCore(dims=(16,16,16), threads=32, elements_per_thread=(16,16,8), dtype_in=di, dtype_out=do,
+  opts=("l0","l0","l0","l0","l1","u1","u1","u1"),
+  swizzle=((('l4', 'u0', 'u1', 'u2', 'l0'), ('r1', 'r2', 'r3'), ('l1', 'l2', 'l3', 'r0')),
+           (('l0', 'l1', 'l2', 'l3', 'l4'), ('r1', 'r2', 'r3'), ('u0', 'u1', 'u2', 'r0'))))
+  for di,do in [(dtypes.half,dtypes.float),(dtypes.half,dtypes.half),(dtypes.float,dtypes.float)]]
 else:
 	# this one currently works 100%
 	dummy_cores = [TensorCore(dims=(1,1,1), threads=1, elements_per_thread=(1,1,1), dtype_in=dt, dtype_out=dt,
@@ -97,7 +103,7 @@ class GLSLRenderer(CStyleLanguage):
 		dtypes.char: "int8_t", dtypes.int32: "int", dtypes.int64: "int64_t", dtypes.uint64: "uint64_t", dtypes.uint32: "uint", dtypes.uint64: "uint64_t", dtypes.bool: "bool", dtypes.half: "float16_t",
 		dtypes.float.vec(2): "vec2", dtypes.float.vec(4): "vec4", dtypes.half.vec(2): "f16vec2", dtypes.half.vec(4): "f16vec4", dtypes.int.vec(2): "ivec2", dtypes.int.vec(4): "ivec4",
 		dtypes.uint.vec(2): "uvec2", dtypes.uint.vec(4): "uvec4", dtypes.bool.vec(2): "bvec2", dtypes.bool.vec(4): "bvec4",
-		dtypes.float.vec(16): "vec16"}
+		dtypes.float.vec(8): "vec8", dtypes.float.vec(16): "vec16"}
 	barrier = "barrier();"
 	supports_float4 = False
 	float4 = "vec4"
@@ -143,8 +149,10 @@ class GLSLRenderer(CStyleLanguage):
 		(UPat(Ops.CONST, dtype = dtypes.uint, name="x"), lambda ctx,x: f"({x.arg})"),
 		
 		(UPat(Ops.WHERE, src = (UPat.var("a"), UPat.var("b"), UPat.var("c") )), lambda ctx, a, b, c: f"{ctx[a]} ? {ctx[b]} : {ctx[c]}" ),
+		(UPat(Ops.GEP, src = (UPat.var("a", dtype = dtypes.float.vec(8)),), name="x"), lambda ctx,x, a: ctx[x.src[0]] + f".data[{x.arg[0]}]"),
 		(UPat(Ops.GEP, src = (UPat.var("a", dtype = dtypes.float.vec(16)),), name="x"), lambda ctx,x, a: ctx[x.src[0]] + f".data[{x.arg[0]}]"),
 		(UPat(Ops.GEP, name="x"), lambda ctx,x: ctx[x.src[0]] + f"[{x.arg[0]}]"),
+		(UPat(Ops.VECTORIZE, dtype = dtypes.float.vec(8), name="x"), lambda ctx, x: f"make_{ctx.render_dtype(x.dtype)}" + f"{ctx.float4_style[0]}{','.join([ctx[y] for y in x.src])}{ctx.float4_style[1]}"),
 		(UPat(Ops.VECTORIZE, dtype = dtypes.float.vec(16), name="x"), lambda ctx, x: f"make_{ctx.render_dtype(x.dtype)}" + f"{ctx.float4_style[0]}{','.join([ctx[y] for y in x.src])}{ctx.float4_style[1]}"),
 		(UPat(Ops.VECTORIZE, name="x"), lambda ctx, x: f"{ctx.render_dtype(x.dtype)}" + f"{ctx.float4_style[0]}{','.join([ctx[y] for y in x.src])}{ctx.float4_style[1]}"),
 		(UPat(Ops.CMPLT, dtype = dtypes.bool, src = (UPat.var("x", dtype = dtypes.bool), UPat.var("y", dtype = dtypes.bool) ) ),
@@ -341,6 +349,77 @@ vec16 add(vec16 a, vec16 b)
 	return d;
 }
 
+vec16 mul(vec16 a, vec16 b)
+{
+	vec16 d = ZERO_VEC16;
+	for (uint i = 0; i < 16; i += 4)
+	{
+		vec4 a4 = vec4(a.data[i], a.data[i+1], a.data[i+2], a.data[i+3]);
+		vec4 b4 = vec4(b.data[i], b.data[i+1], b.data[i+2], b.data[i+3]);
+		vec4 c = a4 * b4;
+		d.data[i] += c[0];
+		d.data[i+1] += c[1];
+		d.data[i+2] += c[2];
+		d.data[i+3] += c[3];
+	}
+	return d;
+}
+
+struct vec8 {
+	float data[8];
+};
+
+vec8 make_vec8(float x0, float x1, float x2, float x3, float x4, float x5, float x6, float x7)
+{
+	return vec8(float[8](x0, x1, x2, x3, x4, x5, x6, x7) );
+}
+
+#define ZERO_VEC8 make_vec8(0,0,0,0,0,0,0,0)
+
+float dot(vec8 a, vec8 b)
+{
+	float d = 0.0;
+	for (uint i = 0; i < 8; i += 4)
+	{
+		vec4 a4 = vec4(a.data[i], a.data[i+1], a.data[i+2], a.data[i+3]);
+		vec4 b4 = vec4(b.data[i], b.data[i+1], b.data[i+2], b.data[i+3]);
+		d += dot(a4, b4);
+	}
+	return d;
+}
+
+vec8 add(vec8 a, vec8 b)
+{
+	vec8 d = ZERO_VEC8;
+	for (uint i = 0; i < 8; i += 4)
+	{
+		vec4 a4 = vec4(a.data[i], a.data[i+1], a.data[i+2], a.data[i+3]);
+		vec4 b4 = vec4(b.data[i], b.data[i+1], b.data[i+2], b.data[i+3]);
+		vec4 c = a4 + b4;
+		d.data[i] += c[0];
+		d.data[i+1] += c[1];
+		d.data[i+2] += c[2];
+		d.data[i+3] += c[3];
+	}
+	return d;
+}
+
+vec8 mul(vec8 a, vec8 b)
+{
+	vec8 d = ZERO_VEC8;
+	for (uint i = 0; i < 8; i += 4)
+	{
+		vec4 a4 = vec4(a.data[i], a.data[i+1], a.data[i+2], a.data[i+3]);
+		vec4 b4 = vec4(b.data[i], b.data[i+1], b.data[i+2], b.data[i+3]);
+		vec4 c = a4 * b4;
+		d.data[i] += c[0];
+		d.data[i+1] += c[1];
+		d.data[i+2] += c[2];
+		d.data[i+3] += c[3];
+	}
+	return d;
+}
+
 vec16 WMMA_4_4_1_float_float(vec4 a, vec4 b, vec16 c)
 {
 	return ZERO_VEC16;
@@ -350,6 +429,41 @@ float WMMA_1_1_1_float_float(float a, float b, float c)
 {
 	return fma(a, b, c);
 }
+
+vec8 WMMA_16_16_16_float_float(vec16 a, vec16 b, vec8 c)
+{
+	// warp size of 32 assumed
+	// so C is assigned by columns...
+	// and if C is assigned by columns, that means...
+	// hmm.
+	// well I think the best thing to do is multiply a by b, first of all
+	vec16 intermediate = mul(a, b);
+	
+	// once we have the intermediate, things get a bit tricky.
+	// each warp should have 2 of these intermediates stored in it.
+	// so we have to take the vector element (emulated VGPR)
+	// and somehow broadcast it across all the other subgroup lanes.
+	// So it looks like the C element is the K index // 2.
+	// And there are of course 32 different c vectors, since that is the number of threads per wave.
+	// Then does the intermediate (a*b) value go into the lower half, or the upper half?
+	// It seems that if the K index is even, it goes in the lower half.
+	// If the K index is odd, it goes in the upper half.
+	// Sooo...how to get the K index?
+	// should be:
+	uint k = gl_SubgroupID;
+	bool lower = true;
+	if (k >= 16)
+	{
+		lower = false;
+		k -= 16;
+	}
+	// this is nicer. if the subgroup ID is 16 or over, it gets put in the upper half. thats more straightforward
+	// now I just need to figure out a way to convert gl_SubgroupID to the element of D that is being used.
+	// and I have no idea how to do that. so for now, we wait :c
+	
+	return c;
+}
+
 #if 0
 vec4 WMMA_2_2_1_float_float(vec2 a, vec2 b, vec4 c)
 {
@@ -399,6 +513,10 @@ precise float16_t log2_precise(float16_t t) { if (t == 0.0) return float16_t(-1.
 	
 	def _render_extensions(self):
 		extensions = {
+			#"#extension GL_KHR_shader_subgroup : enable": True, # TODO: force-enable this on device initialization
+			"#extension GL_KHR_shader_subgroup_arithmetic : enable": True, # TODO: force-enable this on device initialization
+			"#extension GL_KHR_shader_subgroup_shuffle : enable": True, # TODO: force-enable this on device initialization
+			"#extension GL_KHR_shader_subgroup_ballot : enable": True, # TODO: force-enable this on device initialization
 			"#extension GL_EXT_control_flow_attributes : enable": True,
 			"#extension GL_EXT_buffer_reference : require": self.supports_float4,
 			"#extension GL_EXT_shader_explicit_arithmetic_types: require": True,

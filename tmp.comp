@@ -1,4 +1,7 @@
 #version 450
+#extension GL_KHR_shader_subgroup_arithmetic : enable
+#extension GL_KHR_shader_subgroup_shuffle : enable
+#extension GL_KHR_shader_subgroup_ballot : enable
 #extension GL_EXT_control_flow_attributes : enable
 #extension GL_EXT_buffer_reference : require
 #extension GL_EXT_shader_explicit_arithmetic_types: require
@@ -58,6 +61,77 @@ vec16 add(vec16 a, vec16 b)
 	return d;
 }
 
+vec16 mul(vec16 a, vec16 b)
+{
+	vec16 d = ZERO_VEC16;
+	for (uint i = 0; i < 16; i += 4)
+	{
+		vec4 a4 = vec4(a.data[i], a.data[i+1], a.data[i+2], a.data[i+3]);
+		vec4 b4 = vec4(b.data[i], b.data[i+1], b.data[i+2], b.data[i+3]);
+		vec4 c = a4 * b4;
+		d.data[i] += c[0];
+		d.data[i+1] += c[1];
+		d.data[i+2] += c[2];
+		d.data[i+3] += c[3];
+	}
+	return d;
+}
+
+struct vec8 {
+	float data[8];
+};
+
+vec8 make_vec8(float x0, float x1, float x2, float x3, float x4, float x5, float x6, float x7)
+{
+	return vec8(float[8](x0, x1, x2, x3, x4, x5, x6, x7) );
+}
+
+#define ZERO_VEC8 make_vec8(0,0,0,0,0,0,0,0)
+
+float dot(vec8 a, vec8 b)
+{
+	float d = 0.0;
+	for (uint i = 0; i < 8; i += 4)
+	{
+		vec4 a4 = vec4(a.data[i], a.data[i+1], a.data[i+2], a.data[i+3]);
+		vec4 b4 = vec4(b.data[i], b.data[i+1], b.data[i+2], b.data[i+3]);
+		d += dot(a4, b4);
+	}
+	return d;
+}
+
+vec8 add(vec8 a, vec8 b)
+{
+	vec8 d = ZERO_VEC8;
+	for (uint i = 0; i < 8; i += 4)
+	{
+		vec4 a4 = vec4(a.data[i], a.data[i+1], a.data[i+2], a.data[i+3]);
+		vec4 b4 = vec4(b.data[i], b.data[i+1], b.data[i+2], b.data[i+3]);
+		vec4 c = a4 + b4;
+		d.data[i] += c[0];
+		d.data[i+1] += c[1];
+		d.data[i+2] += c[2];
+		d.data[i+3] += c[3];
+	}
+	return d;
+}
+
+vec8 mul(vec8 a, vec8 b)
+{
+	vec8 d = ZERO_VEC8;
+	for (uint i = 0; i < 8; i += 4)
+	{
+		vec4 a4 = vec4(a.data[i], a.data[i+1], a.data[i+2], a.data[i+3]);
+		vec4 b4 = vec4(b.data[i], b.data[i+1], b.data[i+2], b.data[i+3]);
+		vec4 c = a4 * b4;
+		d.data[i] += c[0];
+		d.data[i+1] += c[1];
+		d.data[i+2] += c[2];
+		d.data[i+3] += c[3];
+	}
+	return d;
+}
+
 vec16 WMMA_4_4_1_float_float(vec4 a, vec4 b, vec16 c)
 {
 	return ZERO_VEC16;
@@ -67,6 +141,41 @@ float WMMA_1_1_1_float_float(float a, float b, float c)
 {
 	return fma(a, b, c);
 }
+
+vec8 WMMA_16_16_16_float_float(vec16 a, vec16 b, vec8 c)
+{
+	// warp size of 32 assumed
+	// so C is assigned by columns...
+	// and if C is assigned by columns, that means...
+	// hmm.
+	// well I think the best thing to do is multiply a by b, first of all
+	vec16 intermediate = mul(a, b);
+	
+	// once we have the intermediate, things get a bit tricky.
+	// each warp should have 2 of these intermediates stored in it.
+	// so we have to take the vector element (emulated VGPR)
+	// and somehow broadcast it across all the other subgroup lanes.
+	// So it looks like the C element is the K index // 2.
+	// And there are of course 32 different c vectors, since that is the number of threads per wave.
+	// Then does the intermediate (a*b) value go into the lower half, or the upper half?
+	// It seems that if the K index is even, it goes in the lower half.
+	// If the K index is odd, it goes in the upper half.
+	// Sooo...how to get the K index?
+	// should be:
+	uint k = gl_SubgroupID;
+	bool lower = true;
+	if (k >= 16)
+	{
+		lower = false;
+		k -= 16;
+	}
+	// this is nicer. if the subgroup ID is 16 or over, it gets put in the upper half. thats more straightforward
+	// now I just need to figure out a way to convert gl_SubgroupID to the element of D that is being used.
+	// and I have no idea how to do that. so for now, we wait :c
+	
+	return c;
+}
+
 #if 0
 vec4 WMMA_2_2_1_float_float(vec2 a, vec2 b, vec4 c)
 {
@@ -111,66 +220,17 @@ layout(buffer_reference, std140, buffer_reference_align = 16) buffer uvec2_ptr {
 layout(buffer_reference, std140, buffer_reference_align = 16) buffer uvec4_ptr { uvec4 data[]; };
 layout(buffer_reference, std140, buffer_reference_align = 16) buffer bvec2_ptr { bvec2 data[]; };
 layout(buffer_reference, std140, buffer_reference_align = 16) buffer bvec4_ptr { bvec4 data[]; };
+layout(buffer_reference, std140, buffer_reference_align = 32) buffer vec8_ptr { vec8 data[]; };
 layout(buffer_reference, std140, buffer_reference_align = 64) buffer vec16_ptr { vec16 data[]; };
 
 float nan() { uint bits = 0xffffffffu; return uintBitsToFloat(bits); }
-layout(push_constant) uniform push_consts { 	ADDR_T data0_65536; 	ADDR_T data1_65536; 	ADDR_T data2_65536; } push;
+layout(push_constant) uniform push_consts { 	ADDR_T data0_65536; 	ADDR_T data1_256; } push;
 void main()
 {
-  float acc0[16];
   int gidx0 = int(gl_WorkGroupID.x); /* 4 */
-  int gidx1 = int(gl_WorkGroupID.y); /* 8 */
   int lidx0 = int(gl_LocalInvocationID.x); /* 8 */
   int lidx1 = int(gl_LocalInvocationID.y); /* 16 */
-  acc0[(0)] = float(0.0f);
-  acc0[(1)] = float(0.0f);
-  acc0[(2)] = float(0.0f);
-  acc0[(3)] = float(0.0f);
-  acc0[(4)] = float(0.0f);
-  acc0[(5)] = float(0.0f);
-  acc0[(6)] = float(0.0f);
-  acc0[(7)] = float(0.0f);
-  acc0[(8)] = float(0.0f);
-  acc0[(9)] = float(0.0f);
-  acc0[(10)] = float(0.0f);
-  acc0[(11)] = float(0.0f);
-  acc0[(12)] = float(0.0f);
-  acc0[(13)] = float(0.0f);
-  acc0[(14)] = float(0.0f);
-  acc0[(15)] = float(0.0f);
-  int alu16 = ((gidx1<<(13))+(lidx0<<(10)));
-  int alu17 = ((gidx0<<(6))+(lidx1<<(2)));
-  for (int Ridx0 = 0; Ridx0 < (64); Ridx0++) {
-    int alu18 = (alu16+(Ridx0<<(2)));
-    vec4 val0 = vec4_ptr(push.data1_65536 + (alu18*4)).data[0];
-    vec4 val1 = vec4_ptr(push.data1_65536 + ((alu18+(256))*4)).data[0];
-    vec4 val2 = vec4_ptr(push.data1_65536 + ((alu18+(512))*4)).data[0];
-    vec4 val3 = vec4_ptr(push.data1_65536 + ((alu18+(768))*4)).data[0];
-    int alu19 = (alu17+(Ridx0<<(10)));
-    vec4 val4 = vec4_ptr(push.data2_65536 + (alu19*4)).data[0];
-    vec4 val5 = vec4_ptr(push.data2_65536 + ((alu19+(256))*4)).data[0];
-    vec4 val6 = vec4_ptr(push.data2_65536 + ((alu19+(512))*4)).data[0];
-    vec4 val7 = vec4_ptr(push.data2_65536 + ((alu19+(768))*4)).data[0];
-    acc0[(1)] = float((acc0[(1)]+(val1[0]*val4[0])+(val1[1]*val5[0])+(val1[2]*val6[0])+(val1[3]*val7[0])));
-    acc0[(5)] = float((acc0[(5)]+(val1[0]*val4[1])+(val1[1]*val5[1])+(val1[2]*val6[1])+(val1[3]*val7[1])));
-    acc0[(9)] = float((acc0[(9)]+(val1[0]*val4[2])+(val1[1]*val5[2])+(val1[2]*val6[2])+(val1[3]*val7[2])));
-    acc0[(13)] = float((acc0[(13)]+(val1[0]*val4[3])+(val1[1]*val5[3])+(val1[2]*val6[3])+(val1[3]*val7[3])));
-    acc0[(2)] = float((acc0[(2)]+(val2[0]*val4[0])+(val2[1]*val5[0])+(val2[2]*val6[0])+(val2[3]*val7[0])));
-    acc0[(6)] = float((acc0[(6)]+(val2[0]*val4[1])+(val2[1]*val5[1])+(val2[2]*val6[1])+(val2[3]*val7[1])));
-    acc0[(10)] = float((acc0[(10)]+(val2[0]*val4[2])+(val2[1]*val5[2])+(val2[2]*val6[2])+(val2[3]*val7[2])));
-    acc0[(14)] = float((acc0[(14)]+(val2[0]*val4[3])+(val2[1]*val5[3])+(val2[2]*val6[3])+(val2[3]*val7[3])));
-    acc0[(3)] = float((acc0[(3)]+(val3[0]*val4[0])+(val3[1]*val5[0])+(val3[2]*val6[0])+(val3[3]*val7[0])));
-    acc0[(7)] = float((acc0[(7)]+(val3[0]*val4[1])+(val3[1]*val5[1])+(val3[2]*val6[1])+(val3[3]*val7[1])));
-    acc0[(11)] = float((acc0[(11)]+(val3[0]*val4[2])+(val3[1]*val5[2])+(val3[2]*val6[2])+(val3[3]*val7[2])));
-    acc0[(15)] = float((acc0[(15)]+(val3[0]*val4[3])+(val3[1]*val5[3])+(val3[2]*val6[3])+(val3[3]*val7[3])));
-    acc0[(0)] = float((acc0[(0)]+(val0[0]*val4[0])+(val0[1]*val5[0])+(val0[2]*val6[0])+(val0[3]*val7[0])));
-    acc0[(4)] = float((acc0[(4)]+(val0[0]*val4[1])+(val0[1]*val5[1])+(val0[2]*val6[1])+(val0[3]*val7[1])));
-    acc0[(8)] = float((acc0[(8)]+(val0[0]*val4[2])+(val0[1]*val5[2])+(val0[2]*val6[2])+(val0[3]*val7[2])));
-    acc0[(12)] = float((acc0[(12)]+(val0[0]*val4[3])+(val0[1]*val5[3])+(val0[2]*val6[3])+(val0[3]*val7[3])));
-  }
-  int alu37 = (alu17+alu16);
-  vec4_ptr(push.data0_65536 + (alu37*4)).data[0] = vec4(acc0[(0)],acc0[(4)],acc0[(8)],acc0[(12)]);
-  vec4_ptr(push.data0_65536 + ((alu37+(256))*4)).data[0] = vec4(acc0[(1)],acc0[(5)],acc0[(9)],acc0[(13)]);
-  vec4_ptr(push.data0_65536 + ((alu37+(512))*4)).data[0] = vec4(acc0[(2)],acc0[(6)],acc0[(10)],acc0[(14)]);
-  vec4_ptr(push.data0_65536 + ((alu37+(768))*4)).data[0] = vec4(acc0[(3)],acc0[(7)],acc0[(11)],acc0[(15)]);
+  int gidx1 = int(gl_WorkGroupID.y); /* 32 */
+  float val0 = float_ptr(push.data1_256 + (lidx0+(gidx1<<(3)))*4).data[0];
+  vec4_ptr(push.data0_65536 + (((gidx0<<(6))+(lidx1<<(2))+(gidx1<<(11))+(lidx0<<(8)))*4)).data[0] = vec4(val0,val0,val0,val0);
 }
